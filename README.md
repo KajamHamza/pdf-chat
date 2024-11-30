@@ -14,3 +14,7 @@ The **PDF Chat App** is a Python-based application that allows you to interact w
 
 ### Prerequisites
 - Python 3.7 or higher installed on your system.
+- Install the required dependencies by running the following command:
+   ```
+   pip install -r requirements.txt
+   ```
