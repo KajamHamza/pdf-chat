@@ -2,14 +2,14 @@ import streamlit as st
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS, Pinecone
+from langchain.embeddings import OpenAIEmbeddings, HuggingFaceInstructEmbeddings
+from langchain.vectorstores import FAISS
 from langchain.chat_models import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
+from htmlTemplates import css, bot_template, user_template
 from langchain.llms import HuggingFaceHub
 from werkzeug.utils import secure_filename
-import pinecone
 from prompts import gen_prompt, acc_prompt, witty_prompt
 
 
@@ -20,17 +20,6 @@ def init_ses_states():
         st.session_state.chat_history = None
     if "chat_pages" not in st.session_state:
         st.session_state.chat_pages = []
-
-
-# Initialize Pinecone
-def init_pinecone():
-    pinecone.init(api_key="PINECONE_API_KEY", environment="us-west1-gcp")  # Replace with your actual Pinecone credentials
-    index_name = "pdf-chat-index"
-    try:
-        pinecone.create_index(index_name, dimension=1536)  # Ensure this dimension matches your embeddings model
-    except Exception as e:
-        print("Index creation failed:", e)
-    return pinecone.Index(index_name)
 
 
 # Multiple PDFs
@@ -63,24 +52,18 @@ def get_text_chunks(text):
 
 def get_vectorstore(text_chunks):
     embeddings = OpenAIEmbeddings()
-    # Create FAISS vector store for local search
-    faiss_vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
-
-    # Create Pinecone vector store for cloud storage
-    pinecone_index = init_pinecone()
-    pinecone_vectorstore = Pinecone.from_texts(text_chunks, embedding=embeddings, index_name=pinecone_index.index_name)
-    
-    return faiss_vectorstore, pinecone_vectorstore
+    # embeddings = HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-xl")
+    vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
+    return vectorstore
 
 
-def get_conversation_chain(faiss_vectorstore, pinecone_vectorstore, temp, model):
+def get_conversation_chain(vectorstore, temp, model):
     llm = ChatOpenAI(temperature=temp, model_name=model)
+    # llm = HuggingFaceHub(repo_id="google/flan-t5-xxl", model_kwargs={"temperature":temp, "max_length":512})
     memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
-    # Combine FAISS and Pinecone for hybrid retrieval
-    retriever = faiss_vectorstore.as_retriever(search_type="hybrid", vectorstore=pinecone_vectorstore)
     conversation_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
-        retriever=retriever,
+        retriever=vectorstore.as_retriever(),
         memory=memory,
     )
     return conversation_chain
@@ -109,10 +92,9 @@ def process_docs(pdf_docs, TEMP, MODEL):
 
     raw_text = get_pdfs_text(pdf_docs)
     text_chunks = get_text_chunks(raw_text)
-    
-    faiss_vectorstore, pinecone_vectorstore = get_vectorstore(text_chunks)
+    vectorstore = get_vectorstore(text_chunks)
 
-    st.session_state.conversation = get_conversation_chain(faiss_vectorstore, pinecone_vectorstore, temp=TEMP, model=MODEL)
+    st.session_state.conversation = get_conversation_chain(vectorstore, temp=TEMP, model=MODEL)
     st.session_state.pdf_processed = True
 
 
@@ -133,7 +115,7 @@ def display_chat_page_titles():
 
 def main():
     st.set_page_config(page_title="Chat with PDFs", page_icon="📚", layout="wide")
-    #st.write(css, unsafe_allow_html=True)
+    st.write(css, unsafe_allow_html=True)
     init_ses_states()
     
     # Title and Subtitle
@@ -160,18 +142,14 @@ def main():
     if st.session_state.get("pdf_processed"):
         prompt = set_prompt(PERSONALITY)
 
+        # PDF Analytics
+        with st.expander("📊 PDF Analytics", expanded=False):
+            pdf_anlalytics(pdf_docs)
+
         # User Input Form
         with st.form("user_input_form"):
             user_question = st.text_input("❓ Ask a question about your documents:")
             send_button = st.form_submit_button("✉️ Send")
-        
-    # Main Content Area
-    if question:
-        st.subheader("Your Question:")
-        st.write(question)
-        st.write("🤔 Generating an answer...")
-        # Placeholder for answer
-        st.empty()  # To dynamically update with an actual answer later
 
         if send_button and user_question:
             if st.session_state.chat_history is None:
@@ -181,6 +159,7 @@ def main():
     else: 
         st.caption("⚠️ Please upload at least one PDF to begin.")
 
+    
 if __name__ == '__main__':
     load_dotenv()
     main()
