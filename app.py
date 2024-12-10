@@ -164,14 +164,6 @@ def main():
         with st.form("user_input_form"):
             user_question = st.text_input("❓ Ask a question about your documents:")
             send_button = st.form_submit_button("✉️ Send")
-        
-    # Main Content Area
-    if question:
-        st.subheader("Your Question:")
-        st.write(question)
-        st.write("🤔 Generating an answer...")
-        # Placeholder for answer
-        st.empty()  # To dynamically update with an actual answer later
 
         if send_button and user_question:
             if st.session_state.chat_history is None:
